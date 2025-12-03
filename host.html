@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sala - Host</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>🎮 Sua Sala</h1>
+
+    <div class="room-info">
+      <p>Código da Sala:</p>
+      <div class="room-code" id="roomCode"></div>
+      <p class="share-text">Compartilhe com seu amigo!</p>
+    </div>
+
+    <div class="status-box" id="status">
+      Aguardando jogador...
+    </div>
+
+    <div class="players-box">
+      <div class="player-card">
+        <div class="player-icon">🎮</div>
+        <div class="player-label">Host</div>
+        <div class="player-name" id="hostName">-</div>
+      </div>
+      <div class="player-card">
+        <div class="player-icon">👤</div>
+        <div class="player-label">Convidado</div>
+        <div class="player-name" id="guestName">Aguardando...</div>
+      </div>
+    </div>
+
+    <div class="button-group">
+      <button id="startBtn" onclick="startGame()" disabled class="btn-primary">
+        Iniciar Jogo
+      </button>
+      <button onclick="leaveRoom()" class="btn-danger">
+        Sair da Sala
+      </button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase.js"></script>
+  <script>
+    const roomCode = localStorage.getItem('roomCode');
+    const playerName = localStorage.getItem('playerName');
+    let subscription = null;
+
+    if (!roomCode || !playerName) {
+      window.location.href = 'index.html';
+    }
+
+    document.getElementById('roomCode').textContent = roomCode;
+    document.getElementById('hostName').textContent = playerName;
+
+    // Inscrever-se em mudanças da sala
+    async function subscribeToRoom() {
+      // Buscar dados iniciais
+      await updateRoomInfo();
+
+      // Inscrever-se em tempo real
+      subscription = supabase
+        .channel('room-' + roomCode)
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${roomCode}` },
+          async (payload) => {
+            await updateRoomInfo();
+          }
+        )
+        .subscribe();
+    }
+
+    async function updateRoomInfo() {
+      const { data: room } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', roomCode)
+        .single();
+
+      if (!room) return;
+
+      if (room.guest_id) {
+        document.getElementById('guestName').textContent = 'Jogador 2';
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('status').textContent = 'Jogador conectado! Clique em Iniciar';
+      }
+
+      if (room.status === 'playing') {
+        window.location.href = 'game.html';
+      }
+    }
+
+    async function startGame() {
+      const { error } = await supabase
+        .from('rooms')
+        .update({ 
+          status: 'playing',
+          current_turn: 'host'
+        })
+        .eq('id', roomCode);
+
+      if (!error) {
+        window.location.href = 'game.html';
+      }
+    }
+
+    async function leaveRoom() {
+      if (subscription) subscription.unsubscribe();
+      await supabase.from('rooms').delete().eq('id', roomCode);
+      localStorage.clear();
+      window.location.href = 'index.html';
+    }
+
+    subscribeToRoom();
+  </script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entrar na Sala</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>🚪 Entrar na Sala</h1>
+
+    <div class="welcome-box">
+      <p>Digite o código da sala do seu amigo</p>
+    </div>
+
+    <div class="input-group">
+      <input type="text" id="roomCodeInput" placeholder="Código da sala" maxlength="6" style="text-transform: uppercase;">
+    </div>
+
+    <div class="button-group">
+      <button onclick="joinRoom()" class="btn-primary">
+        Entrar
+      </button>
+      <button onclick="goBack()" class="btn-secondary">
+        ← Voltar
+      </button>
+    </div>
+
+    <div id="error" class="error"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase.js"></script>
+  <script>
+    const playerName = localStorage.getItem('playerName');
+    
+    if (!playerName) {
+      window.location.href = 'index.html';
+    }
+
+    function goBack() {
+      window.location.href = 'index.html';
+    }
+
+    async function joinRoom() {
+      const code = document.getElementById('roomCodeInput').value.trim().toUpperCase();
+
+      if (!code) {
+        showError('Digite o código da sala!');
+        return;
+      }
+
+      const playerId = generateId();
+
+      try {
+        const { data: room, error } = await supabase
+          .from('rooms')
+          .select('*')
+          .eq('id', code)
+          .single();
+
+        if (error || !room) {
+          showError('Sala não encontrada!');
+          return;
+        }
+
+        if (room.guest_id) {
+          showError('Sala cheia!');
+          return;
+        }
+
+        if (room.status !== 'waiting') {
+          showError('Jogo já começou!');
+          return;
+        }
+
+        const { error: updateError } = await supabase
+          .from('rooms')
+          .update({ guest_id: playerId })
+          .eq('id', code);
+
+        if (updateError) throw updateError;
+
+        localStorage.setItem('playerId', playerId);
+        localStorage.setItem('roomCode', code);
+        localStorage.setItem('isHost', 'false');
+
+        // Aguardar o jogo começar
+        waitForGameStart(code);
+
+      } catch (err) {
+        showError('Erro ao entrar: ' + err.message);
+      }
+    }
+
+    async function waitForGameStart(code) {
+      document.getElementById('error').textContent = 'Conectado! Aguardando host iniciar...';
+      document.getElementById('error').style.display = 'block';
+      document.getElementById('error').style.background = 'rgba(46, 213, 115, 0.2)';
+      document.getElementById('error').style.color = '#2ed573';
+
+      const subscription = supabase
+        .channel('wait-room-' + code)
+        .on('postgres_changes', 
+          { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${code}` },
+          (payload) => {
+            if (payload.new.status === 'playing') {
+              subscription.unsubscribe();
+              window.location.href = 'game.html';
+            }
+          }
+        )
+        .subscribe();
+    }
+
+    function showError(message) {
+      const el = document.getElementById('error');
+      el.textContent = message;
+      el.style.display = 'block';
+      el.style.background = 'rgba(255, 107, 107, 0.2)';
+      el.style.color = '#ff6b6b';
+      setTimeout(() => el.style.display = 'none', 3000);
+    }
+
+    function generateId() {
+      return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    }
+  </script>
+</body>
+</html>

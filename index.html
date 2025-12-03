@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jogo da Velha Online</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>⭕ Jogo da Velha ❌</h1>
+    
+    <div class="welcome-box">
+      <h2>Bem-vindo!</h2>
+      <p>Jogue online com seus amigos</p>
+    </div>
+
+    <div class="input-group">
+      <input type="text" id="playerName" placeholder="Digite seu nome" maxlength="20">
+    </div>
+
+    <div class="button-group">
+      <button onclick="createRoom()" class="btn-primary">
+        🎮 Criar Sala
+      </button>
+      <button onclick="goToJoin()" class="btn-secondary">
+        🚪 Entrar em uma Sala
+      </button>
+    </div>
+
+    <div id="error" class="error"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase.js"></script>
+  <script>
+    function goToJoin() {
+      const name = document.getElementById('playerName').value.trim();
+      if (!name) {
+        showError('Digite seu nome primeiro!');
+        return;
+      }
+      localStorage.setItem('playerName', name);
+      window.location.href = 'join.html';
+    }
+
+    async function createRoom() {
+      const name = document.getElementById('playerName').value.trim();
+      if (!name) {
+        showError('Digite seu nome primeiro!');
+        return;
+      }
+
+      const playerId = generateId();
+      const roomCode = generateRoomCode();
+
+      try {
+        const { error } = await supabase.from('rooms').insert({
+          id: roomCode,
+          host_id: playerId,
+          status: 'waiting'
+        });
+
+        if (error) throw error;
+
+        localStorage.setItem('playerName', name);
+        localStorage.setItem('playerId', playerId);
+        localStorage.setItem('roomCode', roomCode);
+        localStorage.setItem('isHost', 'true');
+
+        window.location.href = 'host.html';
+      } catch (err) {
+        showError('Erro ao criar sala: ' + err.message);
+      }
+    }
+
+    function showError(message) {
+      const el = document.getElementById('error');
+      el.textContent = message;
+      el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 3000);
+    }
+
+    function generateId() {
+      return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    }
+
+    function generateRoomCode() {
+      return Math.random().toString(36).substr(2, 6).toUpperCase();
+    }
+  </script>
+</body>
+</html>
