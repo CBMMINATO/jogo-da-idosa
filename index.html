@@ -8,17 +8,19 @@
 </head>
 <body>
   <div class="container">
-    <h1>⭕ Jogo da Velha ❌</h1>
+    <h1>⭕ Jogo da Idosa ❌</h1>
     
     <div class="welcome-box">
       <h2>Bem-vindo!</h2>
       <p>Jogue online com seus amigos</p>
     </div>
 
+    <!-- Campo para digitar o nome do jogador -->
     <div class="input-group">
       <input type="text" id="playerName" placeholder="Digite seu nome" maxlength="20">
     </div>
 
+    <!-- Botões para criar ou entrar em uma sala -->
     <div class="button-group">
       <button onclick="createRoom()" class="btn-primary">
         🎮 Criar Sala
@@ -28,63 +30,88 @@
       </button>
     </div>
 
+    <!-- Mensagem de erro (aparece quando algo dá errado) -->
     <div id="error" class="error"></div>
   </div>
 
+  <!-- Biblioteca do Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Configuração do Supabase -->
   <script src="supabase.js"></script>
+  
   <script>
+    // ===== IR PARA TELA DE ENTRAR NA SALA =====
     function goToJoin() {
       const name = document.getElementById('playerName').value.trim();
+      
+      // Valida se o nome foi preenchido
       if (!name) {
         showError('Digite seu nome primeiro!');
         return;
       }
+      
+      // Salva o nome no navegador e vai para a tela de join
       localStorage.setItem('playerName', name);
       window.location.href = 'join.html';
     }
 
+    // ===== CRIAR NOVA SALA =====
     async function createRoom() {
       const name = document.getElementById('playerName').value.trim();
+      
+      // Valida se o nome foi preenchido
       if (!name) {
         showError('Digite seu nome primeiro!');
         return;
       }
 
-      const playerId = generateId();
-      const roomCode = generateRoomCode();
+      // Gera IDs únicos
+      const playerId = generateId();      // ID único do jogador
+      const roomCode = generateRoomCode(); // Código da sala (ex: ABC123)
 
       try {
+        // Cria a sala no banco de dados
         const { error } = await supabase.from('rooms').insert({
           id: roomCode,
           host_id: playerId,
+          host_name: name,        // 🆕 Salva o nome do host
           status: 'waiting'
         });
 
         if (error) throw error;
 
+        // Salva informações no navegador
         localStorage.setItem('playerName', name);
         localStorage.setItem('playerId', playerId);
         localStorage.setItem('roomCode', roomCode);
         localStorage.setItem('isHost', 'true');
 
+        // Vai para a tela de lobby do host
         window.location.href = 'host.html';
+        
       } catch (err) {
         showError('Erro ao criar sala: ' + err.message);
       }
     }
 
+    // ===== MOSTRAR MENSAGEM DE ERRO =====
     function showError(message) {
       const el = document.getElementById('error');
       el.textContent = message;
       el.style.display = 'block';
+      
+      // Esconde a mensagem após 3 segundos
       setTimeout(() => el.style.display = 'none', 3000);
     }
 
+    // ===== GERAR ID ÚNICO =====
+    // Usa timestamp + números aleatórios para criar ID único
     function generateId() {
       return Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
 
+    // ===== GERAR CÓDIGO DE SALA =====
+    // Gera código de 6 caracteres (ex: ABC123)
     function generateRoomCode() {
       return Math.random().toString(36).substr(2, 6).toUpperCase();
     }
