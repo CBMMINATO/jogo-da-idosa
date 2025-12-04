@@ -10,12 +10,15 @@
   <div class="container">
     <h1>⭕ Jogo da Velha ❌</h1>
 
+    <!-- Card dos jogadores com símbolos, nomes e contador de peças -->
     <div class="players-box-game">
+      <!-- Jogador 1 (Host) - Sempre é X -->
       <div class="player-card-game" id="player1Card">
         <div class="player-symbol">❌</div>
         <div class="player-name-game" id="player1Name"></div>
         <div class="pieces-count" id="player1Pieces">Peças: 3</div>
       </div>
+      <!-- Jogador 2 (Guest) - Sempre é O -->
       <div class="player-card-game" id="player2Card">
         <div class="player-symbol">⭕</div>
         <div class="player-name-game" id="player2Name"></div>
@@ -23,11 +26,16 @@
       </div>
     </div>
 
+    <!-- Status principal do jogo (mostra de quem é a vez e o que fazer) -->
     <div class="status-box" id="gameStatus">Coloque suas peças!</div>
+    
+    <!-- Informação da fase atual (Colocação ou Movimento) -->
     <div class="phase-info" id="phaseInfo">Fase de Colocação (3 peças cada)</div>
 
+    <!-- Tabuleiro 3x3 (9 células) -->
     <div class="board" id="board"></div>
 
+    <!-- Botão para sair do jogo -->
     <div class="button-group">
       <button onclick="leaveGame()" class="btn-danger">
         Sair do Jogo
@@ -35,55 +43,29 @@
     </div>
   </div>
 
+  <!-- Biblioteca do Supabase (banco de dados em tempo real) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Configuração do Supabase (URL e chave de API) -->
   <script src="supabase.js"></script>
+  
   <script>
-    const roomCode = localStorage.getItem('roomCode');
-    const playerName = localStorage.getItem('playerName');
-    const playerId = localStorage.getItem('playerId');
-    const isHost = localStorage.getItem('isHost') === 'true';
-    let subscription = null;
-    let selectedPiece = null; // Para o modo de movimento
+    // ===== VARIÁVEIS GLOBAIS =====
+    // Recupera informações salvas no navegador (localStorage)
+    const roomCode = localStorage.getItem('roomCode');        // Código da sala (ex: ABC123)
+    const playerName = localStorage.getItem('playerName');    // Nome do jogador atual
+    const playerId = localStorage.getItem('playerId');        // ID único do jogador
+    const isHost = localStorage.getItem('isHost') === 'true'; // Se é o criador da sala
+    let subscription = null;    // Conexão em tempo real com o Supabase
+    let selectedPiece = null;   // Armazena qual peça está selecionada na fase de movimento
 
+    // Se não tiver informações salvas, volta para a tela inicial
     if (!roomCode || !playerName || !playerId) {
       window.location.href = 'index.html';
     }
 
-    // Configurar nomes
-    if (isHost) {
-      document.getElementById('player1Name').textContent = playerName + ' (Você)';
-      document.getElementById('player2Name').textContent = 'Oponente';
-    } else {
-      document.getElementById('player1Name').textContent = 'Oponente';
-      document.getElementById('player2Name').textContent = playerName + ' (Você)';
-    }
-
-    // Criar tabuleiro
-    const boardEl = document.getElementById('board');
-    for (let i = 0; i < 9; i++) {
-      const cell = document.createElement('button');
-      cell.className = 'cell';
-      cell.dataset.index = i;
-      cell.onclick = () => handleCellClick(i);
-      boardEl.appendChild(cell);
-    }
-
-    // Inscrever-se em mudanças
-    async function subscribeToGame() {
-      await updateBoard();
-
-      subscription = supabase
-        .channel('game-' + roomCode)
-        .on('postgres_changes', 
-          { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomCode}` },
-          async () => {
-            await updateBoard();
-          }
-        )
-        .subscribe();
-    }
-
-    async function updateBoard() {
+    // ===== BUSCAR E EXIBIR NOMES DOS JOGADORES =====
+    async function loadPlayerNames() {
+      // Busca informações da sala no banco de dados
       const { data: room } = await supabase
         .from('rooms')
         .select('*')
@@ -92,94 +74,186 @@
 
       if (!room) return;
 
-      const board = room.board;
-      const cells = document.querySelectorAll('.cell');
+      // Buscar nome do host (criador da sala)
+      let hostName = 'Host';
+      if (room.host_name) {
+        hostName = room.host_name;
+      }
 
-      // Contar peças de cada jogador
+      // Buscar nome do guest (convidado)
+      let guestName = 'Convidado';
+      if (room.guest_name) {
+        guestName = room.guest_name;
+      }
+
+      // Configurar nomes na tela
+      // Se você é o host, mostra "(Você)" no seu nome
+      if (isHost) {
+        document.getElementById('player1Name').textContent = hostName + ' (Você)';
+        document.getElementById('player2Name').textContent = guestName;
+      } else {
+        // Se você é o guest, mostra "(Você)" no seu nome
+        document.getElementById('player1Name').textContent = hostName;
+        document.getElementById('player2Name').textContent = guestName + ' (Você)';
+      }
+    }
+
+    // ===== CRIAR TABULEIRO (9 CÉLULAS) =====
+    const boardEl = document.getElementById('board');
+    for (let i = 0; i < 9; i++) {
+      const cell = document.createElement('button');       // Cria um botão
+      cell.className = 'cell';                            // Adiciona classe CSS
+      cell.dataset.index = i;                             // Marca a posição (0 a 8)
+      cell.onclick = () => handleCellClick(i);            // Define o que fazer ao clicar
+      boardEl.appendChild(cell);                          // Adiciona ao tabuleiro
+    }
+
+    // ===== INSCREVER-SE EM MUDANÇAS EM TEMPO REAL =====
+    async function subscribeToGame() {
+      // Carrega nomes dos jogadores
+      await loadPlayerNames();
+      
+      // Atualiza o tabuleiro pela primeira vez
+      await updateBoard();
+
+      // Cria um canal de comunicação em tempo real com o Supabase
+      // Toda vez que a sala for atualizada, a função updateBoard() é executada
+      subscription = supabase
+        .channel('game-' + roomCode)                     // Canal único para esta sala
+        .on('postgres_changes',                           // Escuta mudanças no banco
+          { 
+            event: 'UPDATE',                              // Tipo: atualização
+            schema: 'public',                             // Schema do banco
+            table: 'rooms',                               // Tabela: rooms
+            filter: `id=eq.${roomCode}`                   // Filtra apenas esta sala
+          },
+          async () => {
+            await updateBoard();                          // Atualiza tela quando houver mudança
+          }
+        )
+        .subscribe();                                     // Ativa a inscrição
+    }
+
+    // ===== ATUALIZAR TABULEIRO E INTERFACE =====
+    async function updateBoard() {
+      // Busca dados atualizados da sala no banco
+      const { data: room } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', roomCode)
+        .single();
+
+      if (!room) return;
+
+      // Board é um array com 9 posições: ['X', '', 'O', '', '', '', '', '', '']
+      const board = room.board;
+      const cells = document.querySelectorAll('.cell');   // Pega todas as células do tabuleiro
+
+      // ===== CONTAR PEÇAS NO TABULEIRO =====
+      // Conta quantas peças X e O existem no tabuleiro
       const xPieces = board.filter(cell => cell === 'X').length;
       const oPieces = board.filter(cell => cell === 'O').length;
 
-      // Atualizar contador de peças
+      // ===== ATUALIZAR CONTADOR DE PEÇAS =====
+      // Mostra quantas peças cada jogador ainda pode colocar (3 - peças já colocadas)
       document.getElementById('player1Pieces').textContent = `Peças: ${3 - xPieces}/3`;
       document.getElementById('player2Pieces').textContent = `Peças: ${3 - oPieces}/3`;
 
-      // Determinar fase do jogo
+      // ===== DETERMINAR FASE DO JOGO =====
+      // Fase de Colocação: enquanto algum jogador tiver menos de 3 peças
+      // Fase de Movimento: quando ambos tiverem colocado suas 3 peças
       const placementPhase = xPieces < 3 || oPieces < 3;
 
-      // Atualizar células
+      // ===== ATUALIZAR CÉLULAS DO TABULEIRO =====
       cells.forEach((cell, i) => {
-        const value = board[i];
+        const value = board[i];  // Pega o valor da posição (X, O ou vazio)
+        
+        // Define o conteúdo visual da célula
         cell.textContent = value === 'X' ? '❌' : value === 'O' ? '⭕' : '';
         
-        // Resetar classes
+        // Remove todas as classes e adiciona a básica
         cell.className = 'cell';
-        if (value === 'X') cell.classList.add('x');
-        if (value === 'O') cell.classList.add('o');
+        if (value === 'X') cell.classList.add('x');      // Adiciona cor vermelha
+        if (value === 'O') cell.classList.add('o');      // Adiciona cor azul
         
-        // Se uma peça está selecionada, destacar
+        // Se esta peça está selecionada, destaca com amarelo
         if (selectedPiece === i) {
           cell.classList.add('selected');
         }
       });
 
-      // Verificar vez
+      // ===== VERIFICAR DE QUEM É A VEZ =====
+      // Compara se o current_turn da sala corresponde ao tipo do jogador (host/guest)
       const myTurn = (isHost && room.current_turn === 'host') || 
                      (!isHost && room.current_turn === 'guest');
-      const mySymbol = isHost ? 'X' : 'O';
+      const mySymbol = isHost ? 'X' : 'O';               // Símbolo do jogador atual
 
-      // Atualizar status e info de fase
+      // ===== ATUALIZAR MENSAGENS DE STATUS =====
       if (placementPhase) {
+        // FASE DE COLOCAÇÃO
         const myPiecesLeft = isHost ? (3 - xPieces) : (3 - oPieces);
         document.getElementById('phaseInfo').textContent = `Fase de Colocação (${myPiecesLeft} peças restantes)`;
         document.getElementById('gameStatus').textContent = myTurn ? '🎮 Sua vez - Coloque uma peça!' : '⏳ Oponente colocando peça...';
       } else {
+        // FASE DE MOVIMENTO
         document.getElementById('phaseInfo').textContent = 'Fase de Movimento (mova suas peças)';
         if (selectedPiece !== null) {
+          // Se já selecionou uma peça, pede para escolher destino
           document.getElementById('gameStatus').textContent = '📍 Escolha onde mover a peça!';
         } else {
+          // Se não selecionou, pede para selecionar uma peça
           document.getElementById('gameStatus').textContent = myTurn ? '🎮 Sua vez - Selecione uma peça!' : '⏳ Oponente movendo...';
         }
       }
 
-      // Gerenciar cliques nas células
+      // ===== GERENCIAR CLIQUES NAS CÉLULAS =====
       cells.forEach((cell, i) => {
         const value = board[i];
         
         if (placementPhase) {
-          // Fase de colocação: só pode clicar em células vazias
+          // FASE DE COLOCAÇÃO: só pode clicar em células vazias e se for sua vez
           cell.disabled = !myTurn || value !== '';
         } else {
-          // Fase de movimento
+          // FASE DE MOVIMENTO
           if (!myTurn) {
+            // Se não é sua vez, desabilita tudo
             cell.disabled = true;
           } else {
             if (selectedPiece === null) {
-              // Pode selecionar suas próprias peças
+              // Sem peça selecionada: pode clicar apenas nas suas próprias peças
               cell.disabled = value !== mySymbol;
             } else {
-              // Pode mover para células vazias
+              // Com peça selecionada: pode clicar apenas em células vazias para mover
               cell.disabled = value !== '';
             }
           }
         }
       });
 
-      // Indicador visual de vez
+      // ===== INDICADOR VISUAL DE VEZ =====
+      // Adiciona classe 'active' no card do jogador que está jogando (brilho/destaque)
       document.getElementById('player1Card').classList.toggle('active', room.current_turn === 'host');
       document.getElementById('player2Card').classList.toggle('active', room.current_turn === 'guest');
 
-      // Verificar vitória
+      // ===== VERIFICAR VITÓRIA =====
       if (room.winner) {
+        // Se há um vencedor, verifica se foi você ou o oponente
         const iWon = (isHost && room.winner === 'host') || (!isHost && room.winner === 'guest');
+        
+        // Atualiza mensagem e cor conforme resultado
         document.getElementById('gameStatus').textContent = iWon ? '🎉 Você venceu!' : '😔 Você perdeu!';
         document.getElementById('gameStatus').style.background = iWon ? 'rgba(46, 213, 115, 0.3)' : 'rgba(255, 107, 107, 0.3)';
         document.getElementById('phaseInfo').textContent = 'Jogo finalizado!';
+        
+        // Desabilita todas as células e limpa seleção
         cells.forEach(c => c.disabled = true);
         selectedPiece = null;
       }
     }
 
+    // ===== LIDAR COM CLIQUE NAS CÉLULAS =====
     async function handleCellClick(index) {
+      // Busca estado atual da sala
       const { data: room } = await supabase
         .from('rooms')
         .select('*')
@@ -188,51 +262,60 @@
 
       if (!room) return;
 
-      const board = room.board;
-      const mySymbol = isHost ? 'X' : 'O';
+      const board = room.board;                          // Tabuleiro atual
+      const mySymbol = isHost ? 'X' : 'O';              // Meu símbolo
       const xPieces = board.filter(cell => cell === 'X').length;
       const oPieces = board.filter(cell => cell === 'O').length;
-      const placementPhase = xPieces < 3 || oPieces < 3;
+      const placementPhase = xPieces < 3 || oPieces < 3;  // Verifica fase
 
       if (placementPhase) {
-        // FASE DE COLOCAÇÃO
+        // ===== FASE DE COLOCAÇÃO =====
+        // Não pode colocar em célula ocupada
         if (board[index] !== '') return;
 
+        // Cria novo tabuleiro com a peça colocada
         const newBoard = [...board];
         newBoard[index] = mySymbol;
 
+        // Verifica se alguém ganhou
         const winner = checkWinner(newBoard);
+        
+        // Alterna a vez para o outro jogador
         const nextTurn = isHost ? 'guest' : 'host';
 
+        // Atualiza o banco de dados
         await supabase
           .from('rooms')
           .update({ 
-            board: newBoard,
-            current_turn: nextTurn,
-            winner: winner,
-            status: winner ? 'finished' : 'playing'
+            board: newBoard,              // Novo estado do tabuleiro
+            current_turn: nextTurn,       // Próximo jogador
+            winner: winner,               // Se alguém ganhou
+            status: winner ? 'finished' : 'playing'  // Status do jogo
           })
           .eq('id', roomCode);
 
       } else {
-        // FASE DE MOVIMENTO
+        // ===== FASE DE MOVIMENTO =====
         if (selectedPiece === null) {
-          // Selecionar peça para mover
+          // PASSO 1: SELECIONAR PEÇA PARA MOVER
           if (board[index] === mySymbol) {
-            selectedPiece = index;
-            updateBoard();
+            selectedPiece = index;        // Armazena qual peça foi selecionada
+            updateBoard();                // Atualiza para mostrar destaque amarelo
           }
         } else {
-          // Mover peça selecionada
+          // PASSO 2: MOVER PEÇA SELECIONADA
           if (board[index] === '') {
+            // Destino está vazio, pode mover
             const newBoard = [...board];
-            newBoard[selectedPiece] = ''; // Remove da posição antiga
-            newBoard[index] = mySymbol; // Coloca na nova posição
-            selectedPiece = null;
+            newBoard[selectedPiece] = '';         // Remove da posição antiga
+            newBoard[index] = mySymbol;           // Coloca na nova posição
+            selectedPiece = null;                 // Limpa seleção
 
+            // Verifica vitória
             const winner = checkWinner(newBoard);
             const nextTurn = isHost ? 'guest' : 'host';
 
+            // Atualiza banco de dados
             await supabase
               .from('rooms')
               .update({ 
@@ -242,8 +325,9 @@
                 status: winner ? 'finished' : 'playing'
               })
               .eq('id', roomCode);
+              
           } else if (board[index] === mySymbol) {
-            // Trocar seleção de peça
+            // Clicou em outra peça sua: troca a seleção
             selectedPiece = index;
             updateBoard();
           }
@@ -251,32 +335,45 @@
       }
     }
 
+    // ===== VERIFICAR VENCEDOR =====
+    // Checa todas as combinações possíveis de vitória (linhas, colunas, diagonais)
     function checkWinner(board) {
       const lines = [
-        [0, 1, 2], [3, 4, 5], [6, 7, 8], // Linhas
-        [0, 3, 6], [1, 4, 7], [2, 5, 8], // Colunas
-        [0, 4, 8], [2, 4, 6] // Diagonais
+        [0, 1, 2], [3, 4, 5], [6, 7, 8],  // Linhas horizontais
+        [0, 3, 6], [1, 4, 7], [2, 5, 8],  // Colunas verticais
+        [0, 4, 8], [2, 4, 6]              // Diagonais
       ];
 
+      // Para cada combinação, verifica se as 3 posições têm o mesmo símbolo
       for (let line of lines) {
         const [a, b, c] = line;
         if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+          // Retorna quem ganhou (host se for X, guest se for O)
           return board[a] === 'X' ? 'host' : 'guest';
         }
       }
 
+      // Ninguém ganhou ainda
       return null;
     }
 
+    // ===== SAIR DO JOGO =====
     async function leaveGame() {
+      // Cancela inscrição em tempo real
       if (subscription) subscription.unsubscribe();
+      
+      // Se for o host, deleta a sala do banco
       if (isHost) {
         await supabase.from('rooms').delete().eq('id', roomCode);
       }
+      
+      // Limpa dados salvos e volta para tela inicial
       localStorage.clear();
       window.location.href = 'index.html';
     }
 
+    // ===== INICIAR O JOGO =====
+    // Quando a página carrega, inscreve-se nas atualizações
     subscribeToGame();
   </script>
 </body>
