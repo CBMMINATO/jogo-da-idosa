@@ -14,10 +14,12 @@
       <p>Digite o código da sala do seu amigo</p>
     </div>
 
+    <!-- Campo para digitar o código da sala -->
     <div class="input-group">
       <input type="text" id="roomCodeInput" placeholder="Código da sala" maxlength="6" style="text-transform: uppercase;">
     </div>
 
+    <!-- Botões para entrar ou voltar -->
     <div class="button-group">
       <button onclick="joinRoom()" class="btn-primary">
         Entrar
@@ -27,66 +29,84 @@
       </button>
     </div>
 
+    <!-- Mensagem de erro ou sucesso -->
     <div id="error" class="error"></div>
   </div>
 
+  <!-- Biblioteca do Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Configuração do Supabase -->
   <script src="supabase.js"></script>
+  
   <script>
+    // Recupera o nome que foi salvo na tela anterior
     const playerName = localStorage.getItem('playerName');
     
+    // Se não tem nome salvo, volta para a tela inicial
     if (!playerName) {
       window.location.href = 'index.html';
     }
 
+    // ===== VOLTAR PARA TELA INICIAL =====
     function goBack() {
       window.location.href = 'index.html';
     }
 
+    // ===== ENTRAR NA SALA =====
     async function joinRoom() {
       const code = document.getElementById('roomCodeInput').value.trim().toUpperCase();
 
+      // Valida se o código foi preenchido
       if (!code) {
         showError('Digite o código da sala!');
         return;
       }
 
-      const playerId = generateId();
+      const playerId = generateId();  // Gera ID único para este jogador
 
       try {
+        // Busca a sala no banco de dados
         const { data: room, error } = await supabase
           .from('rooms')
           .select('*')
           .eq('id', code)
           .single();
 
+        // Verifica se a sala existe
         if (error || !room) {
           showError('Sala não encontrada!');
           return;
         }
 
+        // Verifica se a sala já está cheia (já tem um guest)
         if (room.guest_id) {
           showError('Sala cheia!');
           return;
         }
 
+        // Verifica se o jogo já começou
         if (room.status !== 'waiting') {
           showError('Jogo já começou!');
           return;
         }
 
+        // Atualiza a sala adicionando o guest (convidado)
         const { error: updateError } = await supabase
           .from('rooms')
-          .update({ guest_id: playerId })
+          .update({ 
+            guest_id: playerId,
+            guest_name: playerName  // 🆕 Salva o nome do guest
+          })
           .eq('id', code);
 
         if (updateError) throw updateError;
 
+        // Salva informações no navegador
         localStorage.setItem('playerId', playerId);
         localStorage.setItem('roomCode', code);
         localStorage.setItem('isHost', 'false');
 
-        // Aguardar o jogo começar
+        // Aguarda o host iniciar o jogo (fica monitorando em tempo real)
         waitForGameStart(code);
 
       } catch (err) {
@@ -94,35 +114,49 @@
       }
     }
 
+    // ===== AGUARDAR O JOGO COMEÇAR =====
+    // Fica monitorando a sala em tempo real até o host iniciar o jogo
     async function waitForGameStart(code) {
+      // Mostra mensagem de sucesso
       document.getElementById('error').textContent = 'Conectado! Aguardando host iniciar...';
       document.getElementById('error').style.display = 'block';
       document.getElementById('error').style.background = 'rgba(46, 213, 115, 0.2)';
       document.getElementById('error').style.color = '#2ed573';
 
+      // Inscreve-se para receber atualizações da sala
       const subscription = supabase
         .channel('wait-room-' + code)
         .on('postgres_changes', 
-          { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${code}` },
+          { 
+            event: 'UPDATE',           // Monitora atualizações
+            schema: 'public', 
+            table: 'rooms', 
+            filter: `id=eq.${code}` 
+          },
           (payload) => {
+            // Quando o status mudar para 'playing', vai para a tela do jogo
             if (payload.new.status === 'playing') {
-              subscription.unsubscribe();
-              window.location.href = 'game.html';
+              subscription.unsubscribe();       // Cancela monitoramento
+              window.location.href = 'game.html'; // Vai para o jogo
             }
           }
         )
         .subscribe();
     }
 
+    // ===== MOSTRAR MENSAGEM DE ERRO =====
     function showError(message) {
       const el = document.getElementById('error');
       el.textContent = message;
       el.style.display = 'block';
       el.style.background = 'rgba(255, 107, 107, 0.2)';
       el.style.color = '#ff6b6b';
+      
+      // Esconde após 3 segundos
       setTimeout(() => el.style.display = 'none', 3000);
     }
 
+    // ===== GERAR ID ÚNICO =====
     function generateId() {
       return Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
